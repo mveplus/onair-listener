@@ -23,6 +23,12 @@ IOT_BASE = "http://192.168.1.172"  # e.g. http://192.168.1.50
 IOT_ON  = f"{IOT_BASE}/led/on"
 IOT_OFF = f"{IOT_BASE}/led/off"
 
+# === Choose behavior ===
+# "TAB_ONLY"         -> ON if meeting tab exists (pre-join supported)
+# "TAB_AND_ANY_AV"   -> ON if meeting tab AND (mic OR cam) is active  <-- recommended
+# "TAB_AND_BOTH_AV"  -> ON if meeting tab AND mic AND cam are active
+MODE = "TAB_AND_ANY_AV"
+
 POLL_SECONDS = 1.0
 DEBOUNCE_SECONDS = 2.0
 
@@ -33,7 +39,7 @@ MEETING_URL_PREFIXES = (
     "https://app.zoom.us/",
 )
 
-VIDEO_DEVICES = ("/dev/video0", "/dev/video1")  # extend if you have more
+VIDEO_DEVICES = ("/dev/video0", "/dev/video1")
 
 def http_get(url: str, timeout: float = 2.0) -> int:
     req = urllib.request.Request(url, method="GET")
@@ -61,7 +67,7 @@ def _props(obj):
     return (obj.get("info") or {}).get("props") or obj.get("props") or {}
 
 def mic_in_use() -> bool:
-    # Confirmed on your system: Stream/Input/Audio + "Chromium input"
+    # Your system shows "Stream/Input/Audio" with application.name "Chromium input"
     for o in _pw_dump():
         p = _props(o)
         mc = (p.get("media.class") or "")
@@ -71,24 +77,37 @@ def mic_in_use() -> bool:
     return False
 
 def camera_in_use() -> bool:
-    # Kernel-truth: is /dev/video* busy?
-    # Uses fuser; requires user in 'video' group or sudo.
+    # Kernel-truth: is /dev/video* busy? (requires video group or sudo)
     for dev in VIDEO_DEVICES:
         try:
-            # fuser exits 0 if any process is using the file, else non-zero
             subprocess.check_output(["fuser", dev], stderr=subprocess.DEVNULL)
             return True
         except subprocess.CalledProcessError:
             continue
         except FileNotFoundError:
-            # fuser not installed (psmisc package)
+            # fuser missing: install psmisc
             return False
     return False
 
 def desired_led_state() -> bool:
-    if not meeting_tab_open():
+    meeting = meeting_tab_open()
+    if not meeting:
         return False
-    return mic_in_use() and camera_in_use()
+
+    if MODE == "TAB_ONLY":
+        return True
+
+    mic = mic_in_use()
+    cam = camera_in_use()
+
+    if MODE == "TAB_AND_ANY_AV":
+        return mic or cam
+
+    if MODE == "TAB_AND_BOTH_AV":
+        return mic and cam
+
+    # Safe fallback
+    return False
 
 def main():
     last_raw = None
@@ -96,6 +115,7 @@ def main():
     stable_state = None
     last_sent = None
 
+    print(f"MODE={MODE}  IOT={IOT_BASE}")
     while True:
         raw = desired_led_state()
 
@@ -118,4 +138,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
