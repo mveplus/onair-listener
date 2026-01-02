@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 12px; min-width: 280px; }
+    .row { display:flex; justify-content:space-between; align-items:center; margin: 8px 0; }
+    .pill { padding: 4px 10px; border-radius: 999px; border: 1px solid #ccc; }
+    .on { background:#e9ffff; border-color:#0aa; }
+    .off { background:#f5f5f5; }
+    .muted { color:#666; font-size: 12px; margin-top: 8px; }
+    button { padding: 6px 10px; border-radius: 10px; border: 1px solid #ccc; background: #fafafa; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="row">
+    <div><b>ON-AIR</b></div>
+    <div id="state" class="pill off">OFF</div>
+  </div>
+  <div class="row">
+    <div>Service</div>
+    <div id="service" class="muted">—</div>
+  </div>
+  <div class="row">
+    <button id="openOptions">Settings</button>
+    <button id="refresh">Refresh</button>
+  </div>
+  <div class="muted">Grayscale icon = OFF. Color icon = ON.</div>
+  <script src="popup.js"></script>
+</body>
+</html>
