@@ -1,114 +1,215 @@
-The correct way to launch Snap Chromium with DevTools
-1️⃣ Pick a Snap-writable profile dir
+# ON‑AIR Indicator (Chromium + Linux)
 
-This must live inside Snap’s home:
+A clean, local‑only **ON‑AIR light controller** for Google Meet, Microsoft Teams and Zoom.
 
-$HOME/snap/chromium/common/onair-profile
+It answers one question only:
 
+> **Should my ON‑AIR light be ON right now?**
 
-Create it:
+Based on:
+- Am I in a meeting?
+- Am I actually live (mic and/or camera)?
+- Where should the LED be controlled?
 
+No cloud. No telemetry. No guessing.
+
+---
+
+## Two ways to run it
+
+### Option A — **Browser Extension + Listener** (recommended)
+- Chromium extension detects meeting tabs
+- Sends simple ON / OFF events to the listener
+- Listener optionally gates by mic/camera
+- Listener controls the LED
+
+**Best UX. Most reliable.**
+
+### Option B — **Listener only (no extension)**
+- Listener polls Chrome DevTools:
+  `http://127.0.0.1:9222/json`
+- Detects meeting tabs directly
+- Optional mic/camera gating
+- Controls the LED
+
+**Good for minimal setups or headless automation.**
+
+---
+
+## LED requirements
+
+Your LED device must support:
+```
+GET /led/on
+GET /led/off
+```
+
+Example base URL:
+```
+http://192.168.1.172
+```
+
+---
+
+## Installation prerequisites (Linux)
+
+### Microphone detection (PipeWire)
+```bash
+sudo dnf install -y pipewire-utils        # Fedora
+sudo apt install -y pipewire-utils        # Debian/Ubuntu
+```
+
+### Camera detection
+```bash
+sudo dnf install -y psmisc                # Fedora
+sudo apt install -y psmisc                # Debian/Ubuntu
+sudo usermod -aG video $USER
+# log out and back in
+```
+
+---
+
+## Option A — Extension + Listener
+
+### 1) Install the extension
+- Open `chrome://extensions`
+- Enable **Developer mode**
+- **Load unpacked**
+- Select the extension folder
+
+Set listener URL:
+```
+http://127.0.0.1:8765/event
+```
+
+---
+
+### 2) Run the listener
+
+#### Recommended ON‑AIR logic
+> LED ON when **in meeting AND mic OR camera active**
+
+```bash
+python3 onair_listener_v4.py \
+  --meeting-source extension \
+  --onair-mode meeting-and-mic-or-camera \
+  --enable-av-detection \
+  --mic-app-match chromium,chrome \
+  --led http://192.168.1.172 \
+  --verbose
+```
+
+#### Simple meeting indicator
+```bash
+python3 onair_listener_v4.py \
+  --meeting-source extension \
+  --onair-mode meeting-only \
+  --led http://192.168.1.172
+```
+
+Debug:
+```bash
+curl http://127.0.0.1:8765/health
+curl http://127.0.0.1:8765/debug
+```
+
+---
+
+## Option B — Listener only (no extension)
+
+### Launch Chromium with DevTools enabled
+
+#### Native / RPM / DEB
+```bash
+chromium \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9222
+```
+
+#### Snap
+```bash
 mkdir -p ~/snap/chromium/common/onair-profile
-
-2️⃣ Launch Chromium snap with debugging enabled
-
-⚠️ You must fully exit Chromium first (no background processes).
-
 snap run chromium \
   --remote-debugging-address=127.0.0.1 \
   --remote-debugging-port=9222 \
   --user-data-dir=$HOME/snap/chromium/common/onair-profile
+```
 
-
-Now test:
-
-curl http://127.0.0.1:9222/json
-
-
-If you see JSON → it works.
-
-Important Snap-specific rules (don’t skip)
-❌ This will NOT work
-
-Launching Chromium normally, then trying to attach
-
-Using /tmp, /var, /home/mtl/.config
-
-Running DevTools against an existing session
-
-✅ This DOES work
-
-Launching Chromium explicitly via snap run chromium
-
-Using ~/snap/chromium/common/*
-
-Running your Python monitor outside the snap
-
-Your existing script still works unchanged
-
-Your DevTools-based detection:
-
-http://127.0.0.1:9222/json
-
-
-✅ Works exactly the same
-✅ No Snap permissions needed
-✅ No portals / DBus nonsense
-✅ No extensions required
-
-Your mic/cam detection (PipeWire + /dev/video*) is completely unaffected by Snap.
-
-Recommended quality-of-life improvement (strongly suggested)
-
-Create a launcher script so you don’t forget the flags:
-
-cat > ~/bin/chromium-onair <<'EOF'
-#!/usr/bin/env bash
-exec snap run chromium \
+#### Flatpak (Ungoogled Chromium)
+```bash
+flatpak run io.github.ungoogled_software.ungoogled_chromium \
   --remote-debugging-address=127.0.0.1 \
   --remote-debugging-port=9222 \
-  --user-data-dir=$HOME/snap/chromium/common/onair-profile
-EOF
+  --user-data-dir=$HOME/.config/chromium-meet-monitor
+```
 
-chmod +x ~/bin/chromium-onair
+Verify:
+```bash
+curl http://127.0.0.1:9222/json | head
+```
 
+---
 
-Now just run:
+### Run listener (DevTools mode)
 
-chromium-onair
+```bash
+python3 onair_listener_v4.py \
+  --meeting-source devtools \
+  --onair-mode meeting-and-mic-or-camera \
+  --enable-av-detection \
+  --debug-json http://127.0.0.1:9222/json \
+  --led http://192.168.1.172 \
+  --verbose
+```
 
-Security note (you’re doing this right)
+---
 
-DevTools is bound to 127.0.0.1 only
+## ON‑AIR modes (plain English)
 
-No LAN exposure
+| Mode | Meaning |
+|----|----|
+| `meeting-only` | LED ON while in a meeting |
+| `meeting-and-mic-or-camera` | LED ON only if mic **or** camera active |
+| `meeting-and-mic-and-camera` | LED ON only if mic **and** camera active |
 
-No Snap interface loosening required
+---
 
-This is safer than a browser extension
+## Run as a systemd user service
 
-When Snap is not worth fighting
+```ini
+[Unit]
+Description=ON‑AIR Listener
+After=network-online.target
 
-If you ever get tired of this:
+[Service]
+ExecStart=%h/bin/onair_listener_v4.py --meeting-source extension --onair-mode meeting-and-mic-or-camera --enable-av-detection --led http://192.168.1.172
+Restart=always
+RestartSec=2
 
-Flatpak Chromium: ❌ worse for DevTools
+[Install]
+WantedBy=default.target
+```
 
-Native .rpm Chromium: ✅ easiest
+Enable:
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now onair-listener
+journalctl --user -u onair-listener -f
+```
 
-Ungoogled Chromium (rpmfusion): ✅ best for automation
+---
 
-But your current setup is 100% viable.
+## Security notes
 
-Bottom line
+- Listener binds to `127.0.0.1` by default
+- DevTools must **never** bind to `0.0.0.0`
+- No cloud calls
+- No browser data leaves your machine
 
-✔ Yes — Snap Chromium can use local DevTools
-✔ Your on-air detection architecture remains valid
-✔ Only requirement: launch Chromium with flags every time
+---
 
-If you want, next I can:
+## Mental model
 
-Turn this into a systemd user service
-
-Add auto-launch Chromium when your monitor starts
-
-Add Zoom/Teams “joined” heuristics without DOM scraping
+> **Meeting detection** decides *if a meeting exists*  
+> **AV detection** decides *if you’re live*  
+> **LED control** reflects the truth, debounced and safe
