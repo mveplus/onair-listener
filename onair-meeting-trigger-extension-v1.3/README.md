@@ -135,3 +135,105 @@ These will send requests to every enabled target.
 - Added multi-target outputs (Listener / Simple LED / HTTP Hook)
 - Kept backward compatibility with previous `listenerUrl` and `direct` settings
 - Added token-based templating for easy integration with IoT endpoints
+
+---
+
+## Home Assistant REST (Authorization: Bearer) — Minimal Setup
+
+Use this method if you want the extension to **directly control Home Assistant entities**
+via the REST API.
+
+### Home Assistant URL
+```
+http://192.168.1.200:8123
+```
+
+### 1) Create a Long-Lived Access Token
+1. Home Assistant → click your **user profile**
+2. Scroll to **Long-Lived Access Tokens**
+3. Click **Create Token**
+4. Name it (e.g. `onair-chrome-extension`)
+5. **Copy the token immediately**
+
+### 2) Create a helper entity (recommended)
+Create a Toggle helper:
+
+```
+Settings → Devices & Services → Helpers → Create Helper → Toggle
+```
+
+Example entity:
+```
+input_boolean.on_air
+```
+
+### 3) Configure HTTP Hook target
+
+**Method**
+```
+POST
+```
+
+**ON URL**
+```
+http://192.168.1.200:8123/api/services/input_boolean/turn_on
+```
+
+**OFF URL**
+```
+http://192.168.1.200:8123/api/services/input_boolean/turn_off
+```
+
+**Headers**
+```
+Authorization: Bearer YOUR_LONG_LIVED_TOKEN
+Content-Type: application/json
+```
+
+**Body**
+```json
+{"entity_id":"input_boolean.on_air"}
+```
+
+Save and approve the permission prompt.  
+Use **Test ALL ON / OFF** to verify.
+
+---
+
+## Ungoogled Chromium (Flatpak / Snap) — Extension Location
+
+Sandboxed Chromium builds require extensions to live inside
+the sandbox-visible filesystem.
+
+### Flatpak (Ungoogled Chromium)
+
+App ID:
+```
+io.github.ungoogled_software.ungoogled_chromium
+```
+
+Recommended location:
+```
+~/.var/app/io.github.ungoogled_software.ungoogled_chromium/data/extensions/onair/
+```
+
+Load via:
+```
+chrome://extensions → Load unpacked
+```
+
+---
+
+### Snap (Ubuntu Chromium)
+
+Recommended location:
+```
+~/snap/chromium/common/extensions/onair/
+```
+
+---
+
+### Why this matters
+- Prevents `ERR_FILE_NOT_FOUND` popup errors
+- Avoids sandbox path invalidation
+- Recommended for Home Assistant + LAN IoT usage
