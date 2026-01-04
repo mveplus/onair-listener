@@ -228,6 +228,8 @@ Note: `meeting-only` here means “mic or camera active.”
 AV detection runs automatically when `--meeting-source av` is used or when the ON‑AIR mode requires mic/camera.
 - Use `--app-match` to bias detection toward specific apps (comma‑separated).
 - Use `--disable-av-detection` to force AV off (not allowed with `--meeting-source av`).
+- Camera detection defaults to PipeWire and falls back to `fuser` if no video streams are present.
+  Override with `--camera-detect pipewire` or `--camera-detect fuser`.
 - `--mic-detect any` (default): if no hint matches, fall back to any active capture stream.
 - `--mic-detect match`: only turns on if the hint matches a PipeWire capture stream.
 PipeWire is used for mic and camera detection; `fuser` is only used for camera if PipeWire is unavailable.
