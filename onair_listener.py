@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import threading
 import time
 import subprocess
@@ -133,7 +134,12 @@ def safe_write(path: str, content: str, log: logging.Logger) -> None:
 # Mic/cam detection
 # -------------------------
 
-def mic_in_use_pipewire(app_hints: str, log: logging.Logger, verbose_dump: bool = False) -> bool:
+def mic_in_use_pipewire(
+    app_hints: str,
+    log: logging.Logger,
+    verbose_dump: bool = False,
+    allow_fallback: bool = True,
+) -> bool:
     """
     PipeWire mic capture detection using pw-dump JSON.
 
@@ -145,8 +151,8 @@ def mic_in_use_pipewire(app_hints: str, log: logging.Logger, verbose_dump: bool 
     Strategy (robust):
       1) Prefer a match against (application.name + application.process.binary + node.description + node.name)
          using a comma-separated hint list (e.g. "chromium,chrome,brave").
-      2) If no match hits, fall back to "any capture stream exists" (Stream/Input/Audio),
-         which is usually the correct "mic is in use" truth for ON-AIR.
+      2) If no match hits and allow_fallback=True, fall back to "any capture stream exists"
+         (Stream/Input/Audio), which is usually the correct "mic is in use" truth for ON-AIR.
 
     If verbose_dump=True, we log the candidate capture streams to help tune hints.
     """
@@ -190,7 +196,7 @@ def mic_in_use_pipewire(app_hints: str, log: logging.Logger, verbose_dump: bool 
                 return True
 
         # 2) Fallback: any capture stream exists
-        return len(capture_streams) > 0
+        return allow_fallback and len(capture_streams) > 0
 
     except FileNotFoundError:
         log.debug("pw-dump not found; install pipewire-utils to enable mic detection")
@@ -258,18 +264,13 @@ def meeting_from_devtools(debug_json: str, prefixes: Tuple[str, ...], timeout: f
 # -------------------------
 
 def compute_desired(mode: str, meeting_open: bool, mic: bool, cam: bool) -> str:
-    # map human-readable modes to legacy names
-    if mode == 'meeting-only': mode = 'TAB_ONLY'
-    if mode == 'meeting-and-mic-or-camera': mode = 'TAB_AND_ANY_AV'
-    if mode == 'meeting-and-mic-and-camera': mode = 'TAB_AND_BOTH_AV'
-
     if not meeting_open:
         return "OFF"
-    if mode == "TAB_ONLY":
+    if mode == "meeting-only":
         return "ON"
-    if mode == "TAB_AND_ANY_AV":
+    if mode == "meeting-and-mic-or-camera":
         return "ON" if (mic or cam) else "OFF"
-    if mode == "TAB_AND_BOTH_AV":
+    if mode == "meeting-and-mic-and-camera":
         return "ON" if (mic and cam) else "OFF"
     return "OFF"
 
@@ -357,27 +358,28 @@ def run_loop(args, state: RuntimeState, lock: threading.Lock, log: logging.Logge
             sig = meeting_from_devtools(args.debug_json, prefixes, args.devtools_timeout, log)
             with lock:
                 state.meeting = sig
+        elif args.source == "extension":
+            # Extension events can go stale if the browser/extension dies mid-meeting.
+            if args.event_timeout > 0:
+                now = time.time()
+                with lock:
+                    if state.meeting.meeting_open and (now - state.meeting.ts) > args.event_timeout:
+                        state.meeting = MeetingSignal(meeting_open=False, service="", url="", ts=now)
+                        log.info("Extension meeting state expired after %.1fs", args.event_timeout)
 
-        # 2) Optional AV detection (only when meeting is open)
+        # 2) Optional AV detection (only when meeting is open, unless AV is the source)
         with lock:
             meeting_open = state.meeting.meeting_open
 
         mic = False
         cam = False
-        if args.av and meeting_open:
-            mic_raw = mic_in_use_pipewire(args.mic_app_hint, log, verbose_dump=args.verbose)
-            # Apply mic detection policy
-            if args.mic_detect == 'any':
-                mic = mic_raw  # already any-capable
-            elif args.mic_detect == 'match':
-                # Strict match: disable fallback by requiring at least one hint hit.
-                # We approximate strictness by re-running with a unique hint that must exist in hay.
-                # Instead, we treat mic_raw as match hit only if hints likely found; to be strict we do a second pass.
-                mic = mic_in_use_pipewire(args.mic_app_hint, log, verbose_dump=False)
-                # NOTE: mic_in_use_pipewire includes fallback; strictness handled below by disabling fallback through empty streams.
-                # For true strictness, set a very specific hint like 'Chromium input'.
-            else:
-                mic = mic_raw
+        if args.av and (meeting_open or args.source == "av"):
+            mic = mic_in_use_pipewire(
+                args.mic_app_hint,
+                log,
+                verbose_dump=args.verbose,
+                allow_fallback=(args.mic_detect == "any"),
+            )
             cam = camera_in_use_fuser(video_devices, log)
             with lock:
                 state.av = AvSignal(mic=mic, cam=cam, ts=time.time())
@@ -385,6 +387,18 @@ def run_loop(args, state: RuntimeState, lock: threading.Lock, log: logging.Logge
         else:
             with lock:
                 state.av = AvSignal(mic=None, cam=None, ts=time.time())
+
+        # 2b) If AV is the meeting source, derive meeting state from AV activity.
+        if args.source == "av":
+            now = time.time()
+            with lock:
+                state.meeting = MeetingSignal(
+                    meeting_open=bool(mic or cam),
+                    service="av",
+                    url="",
+                    ts=now,
+                )
+            meeting_open = bool(mic or cam)
 
         # 3) Decide desired state
         desired = compute_desired(args.mode, meeting_open, mic, cam)
@@ -406,6 +420,10 @@ def run_loop(args, state: RuntimeState, lock: threading.Lock, log: logging.Logge
         if (now - last_ts) < args.debounce:
             continue
 
+        if args.led and args.confirm_file and not os.path.exists(args.confirm_file):
+            log.info("LED update skipped; confirm file missing: %s", args.confirm_file)
+            continue
+
         if args.led:
             led_url = args.led.rstrip("/") + ("/led/on" if desired == "ON" else "/led/off")
             ok, msg = retry_get(led_url, timeout=args.led_timeout, retries=args.led_retries, log=log)
@@ -424,14 +442,16 @@ def build_argparser():
         description="ON-AIR Listener (Extension events OR DevTools polling) with optional mic/cam detection."
     )
 
-    ap.add_argument("--meeting-source", "--source", dest="source", choices=["extension", "devtools"], default="extension",
-                    help="Where meeting state comes from: extension HTTP events or DevTools polling")
-    ap.add_argument("--onair-mode", "--mode", dest="mode", choices=["meeting-only","meeting-and-mic-or-camera","meeting-and-mic-and-camera","TAB_ONLY","TAB_AND_ANY_AV","TAB_AND_BOTH_AV"], default="meeting-only",
+    ap.add_argument("--meeting-source", "--source", dest="source", choices=["extension", "devtools", "av"], default="extension",
+                    help="Where meeting state comes from: extension HTTP events, DevTools polling, or local AV activity")
+    ap.add_argument("--onair-mode", "--mode", dest="mode", choices=["meeting-only","meeting-and-mic-or-camera","meeting-and-mic-and-camera"], default="meeting-only",
                     help="Policy for ON-AIR based on meeting + optional AV signals")
 
     # Extension HTTP server
     ap.add_argument("--listen", default="127.0.0.1", help="Bind address for HTTP listener (extension mode)")
     ap.add_argument("--port", type=int, default=8765, help="Port for HTTP listener (extension mode)")
+    ap.add_argument("--event-timeout", type=float, default=15.0,
+                    help="Seconds before extension ON state expires (0 disables)")
 
     # DevTools polling
     ap.add_argument("--debug-json", default="http://127.0.0.1:9222/json", help="Chrome DevTools /json endpoint")
@@ -444,6 +464,8 @@ def build_argparser():
     # Optional AV
     ap.add_argument("--enable-av-detection", "--av", dest="av", action="store_true", help="Enable mic/cam detection (PipeWire + fuser)")
     ap.add_argument("--mic-app-match", "--mic-app-hint", dest="mic_app_hint", default="chromium", help="Comma-separated hints to match PipeWire application.name / application.process.binary (e.g. chromium,chrome)")
+    ap.add_argument("--mic-detect", choices=["any", "match"], default="any",
+                    help="Mic detection policy: match hint only, or allow fallback to any capture stream")
     ap.add_argument("--video-dev", action="append", default=list(VIDEO_DEVICES_DEFAULT),
                     help="Video device(s) to check with fuser (repeatable)")
 
@@ -502,11 +524,13 @@ def main():
             print("LED disabled (no --led)")
 
         print("MEETING_SOURCE=", args.source, "ONAIR_MODE=", args.mode, "AV_DETECTION=", "ON" if args.av else "OFF", "MIC_DETECT=", args.mic_detect,
-              "poll=", args.poll, "debounce=", args.debounce)
+              "poll=", args.poll, "debounce=", args.debounce, "event_timeout=", args.event_timeout)
 
-        if args.mode != "TAB_ONLY" and not args.av:
+        if args.mode != "meeting-only" and not args.av:
             print("NOTE: You selected MODE that depends on mic/cam, but AV detection is OFF.")
             print("      Add --av (and install pipewire-utils + psmisc) if you want mic/cam gating.")
+        if args.source == "av" and not args.av:
+            print("NOTE: AV meeting source requires --av; otherwise no meeting activity is detected.")
 
         if args.confirm_file:
             print("Safety confirm file:", args.confirm_file)

@@ -1,6 +1,11 @@
-# ON‑AIR Indicator (Chromium + Linux)
+# ON‑AIR Indicator (Chromium listener)
 
 A clean, local‑only **ON‑AIR light controller** for Google Meet, Microsoft Teams and Zoom.
+Works on Linux, macOS, and Windows (AV detection is Linux‑only).
+
+This listener is decoupled from
+`https://github.com/mveplus/onair-meeting-trigger/tree/main` for simplicity.
+The browser extension still lives in that repo.
 
 It answers one question only:
 
@@ -15,12 +20,12 @@ No cloud. No telemetry. No guessing.
 
 ---
 
-## Two ways to run it
+## Three ways to run it
 
 ### Option A — **Browser Extension + Listener** (recommended)
 - Chromium extension detects meeting tabs
 - Sends simple ON / OFF events to the listener
-- Listener optionally gates by mic/camera
+- Listener optionally gates by mic/camera (Linux only)
 - Listener controls the LED
 
 **Best UX. Most reliable.**
@@ -33,6 +38,11 @@ No cloud. No telemetry. No guessing.
 - Controls the LED
 
 **Good for minimal setups or headless automation.**
+
+### Option C — **AV‑only (no browser integration, Linux)**
+- Listener uses mic/camera activity as the meeting signal
+- Useful for other browsers or non‑browser calls
+- Requires PipeWire + `fuser` (Linux only)
 
 ---
 
@@ -51,15 +61,20 @@ http://192.168.1.172
 
 ---
 
-## Installation prerequisites (Linux)
+## Installation
 
-### Microphone detection (PipeWire)
+### All platforms
+- Python 3.8+ (no pip dependencies)
+
+### Linux (optional AV detection)
+
+#### Microphone detection (PipeWire)
 ```bash
 sudo dnf install -y pipewire-utils        # Fedora
 sudo apt install -y pipewire-utils        # Debian/Ubuntu
 ```
 
-### Camera detection
+#### Camera detection
 ```bash
 sudo dnf install -y psmisc                # Fedora
 sudo apt install -y psmisc                # Debian/Ubuntu
@@ -67,11 +82,21 @@ sudo usermod -aG video $USER
 # log out and back in
 ```
 
+### macOS
+- Install Python: `brew install python`
+- AV detection is not implemented; use `meeting-only` mode or extension-only logic.
+
+### Windows
+- Install Python 3 from python.org or `winget install Python.Python.3`
+- AV detection is not implemented; use `meeting-only` mode or extension-only logic.
+- Use `py -3` instead of `python3` in the examples below.
+
 ---
 
 ## Option A — Extension + Listener
 
 ### 1) Install the extension
+- Extension source: `https://github.com/mveplus/onair-meeting-trigger/tree/main`
 - Open `chrome://extensions`
 - Enable **Developer mode**
 - **Load unpacked**
@@ -90,7 +115,7 @@ http://127.0.0.1:8765/event
 > LED ON when **in meeting AND mic OR camera active**
 
 ```bash
-python3 onair_listener_v4.py \
+python3 onair_listener.py \
   --meeting-source extension \
   --onair-mode meeting-and-mic-or-camera \
   --enable-av-detection \
@@ -101,7 +126,7 @@ python3 onair_listener_v4.py \
 
 #### Simple meeting indicator
 ```bash
-python3 onair_listener_v4.py \
+python3 onair_listener.py \
   --meeting-source extension \
   --onair-mode meeting-only \
   --led http://192.168.1.172
@@ -143,6 +168,20 @@ flatpak run io.github.ungoogled_software.ungoogled_chromium \
   --user-data-dir=$HOME/.config/chromium-meet-monitor
 ```
 
+#### macOS (Google Chrome)
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9222
+```
+
+#### Windows (Google Chrome)
+```powershell
+"C:\Program Files\Google\Chrome\Application\chrome.exe" `
+  --remote-debugging-address=127.0.0.1 `
+  --remote-debugging-port=9222
+```
+
 Verify:
 ```bash
 curl http://127.0.0.1:9222/json | head
@@ -153,7 +192,7 @@ curl http://127.0.0.1:9222/json | head
 ### Run listener (DevTools mode)
 
 ```bash
-python3 onair_listener_v4.py \
+python3 onair_listener.py \
   --meeting-source devtools \
   --onair-mode meeting-and-mic-or-camera \
   --enable-av-detection \
@@ -161,6 +200,22 @@ python3 onair_listener_v4.py \
   --led http://192.168.1.172 \
   --verbose
 ```
+
+---
+
+## Option C — AV‑only (Linux)
+
+```bash
+python3 onair_listener.py \
+  --meeting-source av \
+  --onair-mode meeting-only \
+  --enable-av-detection \
+  --mic-app-match chromium,chrome \
+  --led http://192.168.1.172 \
+  --verbose
+```
+
+Note: `meeting-only` here means “mic or camera active.”
 
 ---
 
@@ -172,6 +227,34 @@ python3 onair_listener_v4.py \
 | `meeting-and-mic-or-camera` | LED ON only if mic **or** camera active |
 | `meeting-and-mic-and-camera` | LED ON only if mic **and** camera active |
 
+### Mic detection policy (Linux only)
+- `--mic-detect any` (default): if no hint matches, fall back to any active capture stream.
+- `--mic-detect match`: only turns on if the hint matches a PipeWire capture stream.
+
+---
+
+## Extension event timeout (optional)
+
+To prevent a stuck ON state if the extension stops sending events, the listener expires
+extension ON state after 15 seconds by default (extension mode only).
+Set `--event-timeout 0` to disable.
+
+---
+
+## Safety switch (optional)
+
+If you want a physical/automated kill‑switch, require a confirm file before any LED change:
+
+```bash
+python3 onair_listener.py \
+  --confirm-file /tmp/onair-ok \
+  --meeting-source extension \
+  --onair-mode meeting-only \
+  --led http://192.168.1.172
+```
+
+When the file is missing, LED updates are skipped.
+
 ---
 
 ## Run as a systemd user service
@@ -182,7 +265,7 @@ Description=ON‑AIR Listener
 After=network-online.target
 
 [Service]
-ExecStart=%h/bin/onair_listener_v4.py --meeting-source extension --onair-mode meeting-and-mic-or-camera --enable-av-detection --led http://192.168.1.172
+ExecStart=/usr/bin/python3 /path/to/onair_listener.py --meeting-source extension --onair-mode meeting-and-mic-or-camera --enable-av-detection --led http://192.168.1.172
 Restart=always
 RestartSec=2
 
