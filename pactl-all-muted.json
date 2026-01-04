@@ -1,0 +1,105 @@
+Source Output #2232
+	Driver: PipeWire
+	Owner Module: n/a
+	Client: 215
+	Source: 50
+	Sample Specification: s16le 2ch 48000Hz
+	Channel Map: front-left,front-right
+	Format: pcm, format.sample_format = "\"s16le\""  format.rate = "48000"  format.channels = "2"  format.channel_map = "\"front-left,front-right\""
+	Corked: no
+	Mute: no
+	Volume: front-left: 65536 / 100% / 0.00 dB,   front-right: 65536 / 100% / 0.00 dB
+	        balance 0.00
+	Buffer Latency: 0 usec
+	Source Latency: 0 usec
+	Resample method: PipeWire
+	Properties:
+		client.api = "pipewire-pulse"
+		pulse.server.type = "unix"
+		pipewire.access.portal.app_id = "io.github.ungoogled_software.ungoogled_chromium"
+		media.category = "Manager"
+		pipewire.client.access = "flatpak"
+		application.name = "Chromium input"
+		application.process.id = "171"
+		application.process.user = "mtl"
+		application.process.host = "fedora"
+		application.process.binary = "chrome"
+		application.language = "en_GB.UTF-8"
+		window.x11.display = ":0"
+		application.process.machine_id = "debc5e30bd234f6a84072c2161717793"
+		application.icon_name = "chromium-browser"
+		media.name = "RecordStream"
+		node.rate = "1/48000"
+		node.latency = "480/48000"
+		stream.is-live = "true"
+		node.name = "Chromium input"
+		node.want-driver = "true"
+		node.autoconnect = "true"
+		media.class = "Stream/Input/Audio"
+		port.group = "stream.0"
+		adapt.follower.spa-node = ""
+		object.register = "false"
+		factory.id = "7"
+		clock.quantum-limit = "8192"
+		node.loop.name = "data-loop.0"
+		library.name = "audioconvert/libspa-audioconvert"
+		client.id = "72"
+		object.id = "95"
+		object.serial = "2232"
+		pulse.attr.maxlength = "4194304"
+		pulse.attr.fragsize = "1920"
+		node.driver-id = "50"
+		module-stream-restore.id = "source-output-by-application-name:Chromium input"
+
+Source Output #2245
+	Driver: PipeWire
+	Owner Module: n/a
+	Client: 215
+	Source: 50
+	Sample Specification: s16le 2ch 48000Hz
+	Channel Map: front-left,front-right
+	Format: pcm, format.sample_format = "\"s16le\""  format.rate = "48000"  format.channels = "2"  format.channel_map = "\"front-left,front-right\""
+	Corked: no
+	Mute: no
+	Volume: front-left: 65536 / 100% / 0.00 dB,   front-right: 65536 / 100% / 0.00 dB
+	        balance 0.00
+	Buffer Latency: 0 usec
+	Source Latency: 0 usec
+	Resample method: PipeWire
+	Properties:
+		client.api = "pipewire-pulse"
+		pulse.server.type = "unix"
+		pipewire.access.portal.app_id = "io.github.ungoogled_software.ungoogled_chromium"
+		media.category = "Manager"
+		pipewire.client.access = "flatpak"
+		application.name = "Chromium input"
+		application.process.id = "171"
+		application.process.user = "mtl"
+		application.process.host = "fedora"
+		application.process.binary = "chrome"
+		application.language = "en_GB.UTF-8"
+		window.x11.display = ":0"
+		application.process.machine_id = "debc5e30bd234f6a84072c2161717793"
+		application.icon_name = "chromium-browser"
+		media.name = "RecordStream"
+		node.rate = "1/48000"
+		node.latency = "1024/48000"
+		stream.is-live = "true"
+		node.name = "Chromium input"
+		node.want-driver = "true"
+		node.autoconnect = "true"
+		media.class = "Stream/Input/Audio"
+		port.group = "stream.0"
+		adapt.follower.spa-node = ""
+		object.register = "false"
+		factory.id = "7"
+		clock.quantum-limit = "8192"
+		node.loop.name = "data-loop.0"
+		library.name = "audioconvert/libspa-audioconvert"
+		client.id = "72"
+		object.id = "112"
+		object.serial = "2245"
+		pulse.attr.maxlength = "4194304"
+		pulse.attr.fragsize = "4096"
+		node.driver-id = "50"
+		module-stream-restore.id = "source-output-by-application-name:Chromium input"

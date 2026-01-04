@@ -403,6 +403,10 @@ def run_loop(args, state: RuntimeState, lock: threading.Lock, log: logging.Logge
             if args.camera_detect == "fuser":
                 cam = camera_in_use_fuser(video_devices, log)
             elif args.camera_detect == "auto" and (not pw_ok or not pw_has_video):
+                if not pw_ok:
+                    log.info("Camera detect auto: PipeWire unavailable; falling back to fuser")
+                elif not pw_has_video:
+                    log.info("Camera detect auto: no PipeWire video streams; falling back to fuser")
                 cam = camera_in_use_fuser(video_devices, log)
             with lock:
                 state.av = AvSignal(mic=mic, cam=cam, ts=time.time())
