@@ -1,7 +1,7 @@
 # ON‑AIR Indicator (Chromium listener)
 
 A clean, local‑only **ON‑AIR light controller** for Google Meet, Microsoft Teams and Zoom.
-Works on Linux, macOS, and Windows (AV detection is Linux‑only).
+Linux-focused listener with local AV detection and LED control.
 
 This listener is decoupled from
 `https://github.com/mveplus/onair-meeting-trigger/tree/main` for simplicity.
@@ -82,17 +82,6 @@ sudo usermod -aG video $USER
 # log out and back in
 ```
 
-### macOS
-- Install Python: `brew install python`
-- AV detection is not implemented; use `meeting-only` mode or extension-only logic.
-
-### Windows
-- Install Python 3 from python.org or `winget install Python.Python.3`
-- AV detection is not implemented; use `meeting-only` mode or extension-only logic.
-- Use `py -3` instead of `python3` in the examples below.
-
----
-
 ## Option A — Extension + Listener
 
 ### 1) Install the extension
@@ -167,20 +156,6 @@ flatpak run io.github.ungoogled_software.ungoogled_chromium \
   --user-data-dir=$HOME/.config/chromium-meet-monitor
 ```
 
-#### macOS (Google Chrome)
-```bash
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
-  --remote-debugging-address=127.0.0.1 \
-  --remote-debugging-port=9222
-```
-
-#### Windows (Google Chrome)
-```powershell
-"C:\Program Files\Google\Chrome\Application\chrome.exe" `
-  --remote-debugging-address=127.0.0.1 `
-  --remote-debugging-port=9222
-```
-
 Verify:
 ```bash
 curl http://127.0.0.1:9222/json | head
@@ -233,6 +208,11 @@ AV detection runs automatically when `--meeting-source av` is used or when the O
 - `--mic-detect any` (default): if no hint matches, fall back to any active capture stream.
 - `--mic-detect match`: only turns on if the hint matches a PipeWire capture stream.
 PipeWire is used for mic and camera detection; `fuser` is only used for camera if PipeWire is unavailable.
+
+### Mic limitation (Linux)
+PipeWire (and pactl) do not always expose app mute state. In many setups, the mic stream
+continues to report as active even when the app is muted, so the listener cannot reliably
+turn OFF on mute without a browser signal or audio‑level monitoring.
 
 ---
 
