@@ -66,15 +66,15 @@ http://192.168.1.172
 ### All platforms
 - Python 3.8+ (no pip dependencies)
 
-### Linux (optional AV detection)
+### Linux (AV detection when needed)
 
-#### Microphone detection (PipeWire)
+#### Microphone + camera detection (PipeWire)
 ```bash
 sudo dnf install -y pipewire-utils        # Fedora
 sudo apt install -y pipewire-utils        # Debian/Ubuntu
 ```
 
-#### Camera detection
+#### Camera detection fallback
 ```bash
 sudo dnf install -y psmisc                # Fedora
 sudo apt install -y psmisc                # Debian/Ubuntu
@@ -118,8 +118,7 @@ http://127.0.0.1:8765/event
 python3 onair_listener.py \
   --meeting-source extension \
   --onair-mode meeting-and-mic-or-camera \
-  --enable-av-detection \
-  --mic-app-match chromium,chrome \
+  --app-match chromium,chrome \
   --led http://192.168.1.172 \
   --verbose
 ```
@@ -195,7 +194,6 @@ curl http://127.0.0.1:9222/json | head
 python3 onair_listener.py \
   --meeting-source devtools \
   --onair-mode meeting-and-mic-or-camera \
-  --enable-av-detection \
   --debug-json http://127.0.0.1:9222/json \
   --led http://192.168.1.172 \
   --verbose
@@ -209,8 +207,7 @@ python3 onair_listener.py \
 python3 onair_listener.py \
   --meeting-source av \
   --onair-mode meeting-only \
-  --enable-av-detection \
-  --mic-app-match chromium,chrome \
+  --app-match chromium,chrome \
   --led http://192.168.1.172 \
   --verbose
 ```
@@ -227,9 +224,13 @@ Note: `meeting-only` here means “mic or camera active.”
 | `meeting-and-mic-or-camera` | LED ON only if mic **or** camera active |
 | `meeting-and-mic-and-camera` | LED ON only if mic **and** camera active |
 
-### Mic detection policy (Linux only)
+### App match policy (Linux only)
+AV detection runs automatically when `--meeting-source av` is used or when the ON‑AIR mode requires mic/camera.
+- Use `--app-match` to bias detection toward specific apps (comma‑separated).
+- Use `--disable-av-detection` to force AV off (not allowed with `--meeting-source av`).
 - `--mic-detect any` (default): if no hint matches, fall back to any active capture stream.
 - `--mic-detect match`: only turns on if the hint matches a PipeWire capture stream.
+PipeWire is used for mic and camera detection; `fuser` is only used for camera if PipeWire is unavailable.
 
 ---
 
@@ -265,7 +266,7 @@ Description=ON‑AIR Listener
 After=network-online.target
 
 [Service]
-ExecStart=/usr/bin/python3 /path/to/onair_listener.py --meeting-source extension --onair-mode meeting-and-mic-or-camera --enable-av-detection --led http://192.168.1.172
+ExecStart=/usr/bin/python3 /path/to/onair_listener.py --meeting-source extension --onair-mode meeting-and-mic-or-camera --led http://192.168.1.172
 Restart=always
 RestartSec=2
 

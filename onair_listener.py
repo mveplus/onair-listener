@@ -134,14 +134,14 @@ def safe_write(path: str, content: str, log: logging.Logger) -> None:
 # Mic/cam detection
 # -------------------------
 
-def mic_in_use_pipewire(
+def av_in_use_pipewire(
     app_hints: str,
     log: logging.Logger,
     verbose_dump: bool = False,
     allow_fallback: bool = True,
-) -> bool:
+) -> Tuple[bool, bool, bool]:
     """
-    PipeWire mic capture detection using pw-dump JSON.
+    PipeWire mic/camera capture detection using pw-dump JSON.
 
     What can go wrong in practice:
       - application.name varies ("Chromium input", "Google Chrome input", etc.)
@@ -151,8 +151,8 @@ def mic_in_use_pipewire(
     Strategy (robust):
       1) Prefer a match against (application.name + application.process.binary + node.description + node.name)
          using a comma-separated hint list (e.g. "chromium,chrome,brave").
-      2) If no match hits and allow_fallback=True, fall back to "any capture stream exists"
-         (Stream/Input/Audio), which is usually the correct "mic is in use" truth for ON-AIR.
+      2) If no match hits and allow_fallback=True, fall back to any capture stream exists
+         (Stream/Input/Audio or Stream/Input/Video).
 
     If verbose_dump=True, we log the candidate capture streams to help tune hints.
     """
@@ -167,10 +167,12 @@ def mic_in_use_pipewire(
         def props(o):
             return (o.get("info") or {}).get("props") or o.get("props") or {}
 
-        capture_streams = []
+        audio_streams = []
+        video_streams = []
         for o in data:
             p = props(o)
-            if (p.get("media.class") or "") != "Stream/Input/Audio":
+            media_class = (p.get("media.class") or "").strip()
+            if media_class not in ("Stream/Input/Audio", "Stream/Input/Video"):
                 continue
 
             app_name = (p.get("application.name") or "").strip()
@@ -183,27 +185,43 @@ def mic_in_use_pipewire(
             node_state = (info.get("state") or "").strip()
 
             hay = f"{app_name} {app_bin} {node_desc} {node_name}".lower().strip()
-            capture_streams.append((hay, app_name, app_bin, node_desc, node_name, node_state))
+            item = (hay, app_name, app_bin, node_desc, node_name, node_state)
+            if media_class == "Stream/Input/Audio":
+                audio_streams.append(item)
+            else:
+                video_streams.append(item)
 
-        if verbose_dump and capture_streams:
-            log.info("PipeWire capture streams (Stream/Input/Audio):")
-            for (_hay, app_name, app_bin, node_desc, node_name, node_state) in capture_streams[:30]:
-                log.info("  app=%r bin=%r desc=%r name=%r state=%r", app_name, app_bin, node_desc, node_name, node_state)
+        if verbose_dump and (audio_streams or video_streams):
+            if audio_streams:
+                log.info("PipeWire capture streams (Stream/Input/Audio):")
+                for (_hay, app_name, app_bin, node_desc, node_name, node_state) in audio_streams[:30]:
+                    log.info("  app=%r bin=%r desc=%r name=%r state=%r", app_name, app_bin, node_desc, node_name, node_state)
+            if video_streams:
+                log.info("PipeWire capture streams (Stream/Input/Video):")
+                for (_hay, app_name, app_bin, node_desc, node_name, node_state) in video_streams[:30]:
+                    log.info("  app=%r bin=%r desc=%r name=%r state=%r", app_name, app_bin, node_desc, node_name, node_state)
 
-        # 1) Match preferred
-        for hay, *_rest in capture_streams:
-            if any(h in hay for h in hints):
-                return True
+        def any_match(streams):
+            return any(any(h in hay for h in hints) for (hay, *_rest) in streams)
 
-        # 2) Fallback: any capture stream exists
-        return allow_fallback and len(capture_streams) > 0
+        mic_match = any_match(audio_streams)
+        cam_match = any_match(video_streams)
+
+        if allow_fallback:
+            mic = mic_match or len(audio_streams) > 0
+            cam = cam_match or len(video_streams) > 0
+        else:
+            mic = mic_match
+            cam = cam_match
+
+        return mic, cam, True
 
     except FileNotFoundError:
-        log.debug("pw-dump not found; install pipewire-utils to enable mic detection")
-        return False
+        log.debug("pw-dump not found; install pipewire-utils to enable mic/camera detection")
+        return False, False, False
     except Exception as e:
-        log.debug("pw-dump mic detection failed: %s", e)
-        return False
+        log.debug("pw-dump AV detection failed: %s", e)
+        return False, False, False
 
 
 def camera_in_use_fuser(video_devices: Tuple[str, ...], log: logging.Logger) -> bool:
@@ -367,23 +385,25 @@ def run_loop(args, state: RuntimeState, lock: threading.Lock, log: logging.Logge
                         state.meeting = MeetingSignal(meeting_open=False, service="", url="", ts=now)
                         log.info("Extension meeting state expired after %.1fs", args.event_timeout)
 
-        # 2) Optional AV detection (only when meeting is open, unless AV is the source)
+        # 2) AV detection (only when needed)
         with lock:
             meeting_open = state.meeting.meeting_open
 
         mic = False
         cam = False
-        if args.av and (meeting_open or args.source == "av"):
-            mic = mic_in_use_pipewire(
-                args.mic_app_hint,
+        av_needed = ((args.source == "av") or (args.mode != "meeting-only")) and not args.disable_av_detection
+        if av_needed and (meeting_open or args.source == "av"):
+            mic, cam, pw_ok = av_in_use_pipewire(
+                args.app_hint,
                 log,
                 verbose_dump=args.verbose,
                 allow_fallback=(args.mic_detect == "any"),
             )
-            cam = camera_in_use_fuser(video_devices, log)
+            if not pw_ok:
+                cam = camera_in_use_fuser(video_devices, log)
             with lock:
                 state.av = AvSignal(mic=mic, cam=cam, ts=time.time())
-            log.info("AV: mic=%s cam=%s (hint=%s)", mic, cam, args.mic_app_hint)
+            log.info("AV: mic=%s cam=%s (hint=%s)", mic, cam, args.app_hint)
         else:
             with lock:
                 state.av = AvSignal(mic=None, cam=None, ts=time.time())
@@ -462,8 +482,9 @@ def build_argparser():
                     help="Meeting URL prefixes to match (repeatable)")
 
     # Optional AV
-    ap.add_argument("--enable-av-detection", "--av", dest="av", action="store_true", help="Enable mic/cam detection (PipeWire + fuser)")
-    ap.add_argument("--mic-app-match", "--mic-app-hint", dest="mic_app_hint", default="chromium", help="Comma-separated hints to match PipeWire application.name / application.process.binary (e.g. chromium,chrome)")
+    ap.add_argument("--app-match", "--app-hint", dest="app_hint", default="chromium", help="Comma-separated hints to match PipeWire application.name / application.process.binary (e.g. chromium,chrome)")
+    ap.add_argument("--disable-av-detection", action="store_true",
+                    help="Disable mic/camera detection (not allowed with --meeting-source av)")
     ap.add_argument("--mic-detect", choices=["any", "match"], default="any",
                     help="Mic detection policy: match hint only, or allow fallback to any capture stream")
     ap.add_argument("--video-dev", action="append", default=list(VIDEO_DEVICES_DEFAULT),
@@ -491,6 +512,9 @@ def build_argparser():
 def main():
     ap = build_argparser()
     args = ap.parse_args()
+
+    if args.disable_av_detection and args.source == "av":
+        ap.error("--disable-av-detection cannot be used with --meeting-source av")
 
     log = logging.getLogger("onair")
     logging.basicConfig(
@@ -523,14 +547,12 @@ def main():
         else:
             print("LED disabled (no --led)")
 
-        print("MEETING_SOURCE=", args.source, "ONAIR_MODE=", args.mode, "AV_DETECTION=", "ON" if args.av else "OFF", "MIC_DETECT=", args.mic_detect,
+        av_enabled = ((args.source == "av") or (args.mode != "meeting-only")) and not args.disable_av_detection
+        print("MEETING_SOURCE=", args.source, "ONAIR_MODE=", args.mode, "AV_DETECTION=", "ON" if av_enabled else "OFF", "AV_MATCH=", args.app_hint,
               "poll=", args.poll, "debounce=", args.debounce, "event_timeout=", args.event_timeout)
 
-        if args.mode != "meeting-only" and not args.av:
+        if args.mode != "meeting-only" and not av_enabled:
             print("NOTE: You selected MODE that depends on mic/cam, but AV detection is OFF.")
-            print("      Add --av (and install pipewire-utils + psmisc) if you want mic/cam gating.")
-        if args.source == "av" and not args.av:
-            print("NOTE: AV meeting source requires --av; otherwise no meeting activity is detected.")
 
         if args.confirm_file:
             print("Safety confirm file:", args.confirm_file)
