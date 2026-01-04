@@ -5,7 +5,7 @@ Linux-focused listener with local AV detection and LED control.
 
 This listener is decoupled from
 `https://github.com/mveplus/onair-meeting-trigger/tree/main` for simplicity.
-The browser extension still lives in that repo.
+The Chrome extension still lives in that repo.
 
 It answers one question only:
 
